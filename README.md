@@ -258,31 +258,6 @@ git push heroku main
 
 ---
 
-## 🎓 Viva Q&A
-
-**Q: Why Flask?**
-A: Lightweight, perfect for ML integration, easy deployment, good documentation.
-
-**Q: Why SQLite?**
-A: Zero setup, relational structure, sufficient for prototype, can migrate to PostgreSQL.
-
-**Q: Why MobileNetV2?**
-A: Pre-trained weights reduce training time, efficient inference, mobile deployment-ready.
-
-**Q: Why transfer learning?**
-A: Limited dataset + faster convergence + prevents overfitting + reduces computational cost.
-
-**Q: How does the model work?**
-A: Extracts features from skin lesion images using pre-trained CNN, classifies as Benign or Malignant with confidence score.
-
-**Q: What's the accuracy?**
-A: 94% on validation set; evaluated with confusion matrix, ROC curve, and classification metrics.
-
-**Q: Can it be deployed online?**
-A: Yes! Use Heroku, AWS Lambda, or Google Cloud. Requires model serving (TensorFlow Lite for mobile).
-
----
-
 ## 📊 Performance Metrics
 
 ```
@@ -310,27 +285,9 @@ Classification Report:
 
 ---
 
-## 📞 Support & Contact
-
-For issues or questions:
-- Email: support@skincareai.com
-- GitHub: [project-link]
-- Documentation: [docs-link]
-
----
-
 ## 📄 License
 
 MIT License - See LICENSE file for details
-
----
-
-## ✍️ Authors
-
-**Your Name**
-- BE/BTech CSE, VTU
-- AI/ML Enthusiast
-- GitHub: [@yourprofile]
 
 ---
 
