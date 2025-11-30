@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Skin Cancer Detection{% endblock %}
+
+{% block extra_js %}
+<script>
+// Camera functionality
+let video, canvas, ctx;
+
+function initCamera() {
+    video = document.getElementById('video');
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+            video.srcObject = stream;
+        })
+        .catch(err => {
+            alert('Camera access denied: ' + err);
+        });
+}
+
+function captureSnapshot() {
+    if (!video) return;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    
+    canvas.toBlob(blob => {
+        const file = new File([blob], 'captured.jpg', { type: 'image/jpeg' });
+        document.getElementById('file-input').files = new DataTransfer([file]).items;
+        
+        const preview = canvas.toDataURL();
+        document.getElementById('image-preview').src = preview;
+        document.getElementById('preview-container').style.display = 'block';
+    });
+}
+
+function stopCamera() {
+    if (video && video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+    }
+}
+
+function previewImage(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('image-preview').src = e.target.result;
+            document.getElementById('preview-container').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function predict() {
+    const fileInput = document.getElementById('file-input');
+    if (!fileInput.files.length) {
+        alert('Please upload or capture an image first!');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('image', fileInput.files[0]);
+    
+    const spinner = document.getElementById('spinner-overlay');
+    spinner.classList.add('show');
+    
+    fetch('{{ url_for("main.predict") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        spinner.classList.remove('show');
+        if (data.success) {
+            displayResult(data);
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(err => {
+        spinner.classList.remove('show');
+        alert('Prediction failed: ' + err);
+    });
+}
+
+function displayResult(data) {
+    const resultDiv = document.getElementById('result');
+    const confidence = (data.confidence * 100).toFixed(2);
+    
+    const resultHTML = `
+        <div class="result-card">
+            <div class="result-label">${data.prediction}</div>
+            <div class="result-confidence">Confidence: ${confidence}%</div>
+            <div class="confidence-bar">
+                <div class="confidence-fill" style="width: ${confidence}%">${confidence}%</div>
+            </div>
+        </div>
+    `;
+    
+    resultDiv.innerHTML = resultHTML;
+    resultDiv.style.display = 'block';
+}
+
+window.addEventListener('load', () => {
+    const cameraTab = document.getElementById('camera-tab');
+    if (cameraTab) {
+        cameraTab.addEventListener('click', initCamera);
+    }
+});
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1><i class="fas fa-microscope"></i> Skin Lesion Analysis</h1>
+        <p>Upload or capture an image to detect skin cancer</p>
+    </div>
+    
+    <div class="container">
+        <!-- Tabs -->
+        <div class="card prediction-card">
+            <ul class="nav nav-tabs mb-4" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#upload" data-bs-toggle="tab">
+                        <i class="fas fa-upload"></i> Upload Image
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="camera-tab" href="#camera" data-bs-toggle="tab">
+                        <i class="fas fa-camera"></i> Use Camera
+                    </a>
+                </li>
+            </ul>
+            
+            <div class="tab-content">
+                <!-- Upload Tab -->
+                <div id="upload" class="tab-pane fade show active">
+                    <div class="upload-section">
+                        <h4 style="margin-bottom: 20px;">📤 Choose Image File</h4>
+                        <input type="file" id="file-input" accept="image/*" onchange="previewImage(event)" style="display: none;">
+                        <button type="button" class="upload-btn-custom" onclick="document.getElementById('file-input').click()">
+                            <i class="fas fa-folder-open"></i> Select Image
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Camera Tab -->
+                <div id="camera" class="tab-pane fade">
+                    <div id="video-container" style="display: none; margin-bottom: 20px;">
+                        <video id="video" autoplay playsinline></video>
+                    </div>
+                    
+                    <div class="camera-controls">
+                        <button type="button" class="camera-btn" onclick="document.getElementById('video-container').style.display='block'">
+                            <i class="fas fa-play"></i> Start Camera
+                        </button>
+                        <button type="button" class="camera-btn" onclick="captureSnapshot()">
+                            <i class="fas fa-camera"></i> Capture
+                        </button>
+                        <button type="button" class="camera-btn" onclick="stopCamera(); document.getElementById('video-container').style.display='none'">
+                            <i class="fas fa-stop"></i> Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Image Preview -->
+            <div id="preview-container" style="display: none; text-align: center;">
+                <img id="image-preview" class="image-preview" alt="Preview">
+                <button type="button" class="btn btn-success btn-lg" onclick="predict()">
+                    <i class="fas fa-brain"></i> Analyze Image
+                </button>
+            </div>
+            
+            <!-- Result Display -->
+            <div id="result" style="display: none;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden Canvas for Camera -->
+<canvas id="canvas" style="display: none;"></canvas>
+
+<!-- Loading Spinner -->
+<div id="spinner-overlay" class="spinner-overlay">
+    <div class="spinner-border text-light" role="status">
+        <span class="visually-hidden">Analyzing...</span>
+    </div>
+</div>
+{% endblock %}
