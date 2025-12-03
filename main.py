@@ -10,6 +10,8 @@ from PIL import Image
 import numpy as np
 import os
 from datetime import datetime
+import io
+import base64
 
 main_bp = Blueprint('main', __name__)
 
@@ -95,6 +97,26 @@ def preprocess_image(image_path):
         print(f"Error preprocessing image: {e}")
         raise
 
+def preprocess_image_from_base64(base64_string):
+    """
+    Preprocess image from base64 string (from camera)
+    """
+    try:
+        # Remove data URL prefix if present
+        if ',' in base64_string:
+            base64_string = base64_string.split(',')[1]
+        
+        # Decode base64
+        img_data = base64.b64decode(base64_string)
+        img = Image.open(io.BytesIO(img_data)).convert('RGB')
+        
+        img_tensor = INFERENCE_TRANSFORM(img)  # Returns tensor [3, 224, 224]
+        img_tensor = img_tensor.unsqueeze(0)   # Add batch dimension [1, 3, 224, 224]
+        return img_tensor.to(DEVICE)
+    except Exception as e:
+        print(f"Error preprocessing base64 image: {e}")
+        raise
+
 def predict_image(image_path):
     """
     Make prediction on image using trained model
@@ -109,6 +131,35 @@ def predict_image(image_path):
     
     # Preprocess image
     img_tensor = preprocess_image(image_path)
+    
+    # Make prediction
+    with torch.no_grad():
+        outputs = model(img_tensor)  # Raw logits
+        probabilities = F.softmax(outputs, dim=1)  # Convert to probabilities [0-1]
+        confidence, class_idx = torch.max(probabilities, 1)
+        
+        # Convert to numpy/python types
+        confidence = confidence.item()  # Single float value
+        class_idx = class_idx.item()    # Single integer
+        class_name = CLASS_NAMES[class_idx]
+        
+        # Get all class confidences for detailed output
+        all_probs = probabilities[0].cpu().numpy()
+        all_confidences = {
+            CLASS_NAMES[i]: float(all_probs[i])
+            for i in range(NUM_CLASSES)
+        }
+    
+    return class_name, confidence, class_idx, all_confidences
+
+def predict_image_from_base64(base64_string):
+    """
+    Make prediction on base64 image (from camera)
+    """
+    model = load_model()
+    
+    # Preprocess image from base64
+    img_tensor = preprocess_image_from_base64(base64_string)
     
     # Make prediction
     with torch.no_grad():
@@ -151,7 +202,7 @@ def dashboard():
 @login_required
 def predict():
     """
-    Handle prediction request
+    Handle prediction request from file upload
     
     Expected POST data:
         - image: File object (jpg/png/jpeg/bmp/gif)
@@ -163,7 +214,6 @@ def predict():
             'confidence': float (0-1),
             'confidence_percent': float (0-100),
             'class_idx': int (0-8),
-            'all_confidences': {class_name: probability, ...},
             'image_path': str,
             'error': str (if failed)
         }
@@ -217,12 +267,90 @@ def predict():
             'confidence': float(confidence),
             'confidence_percent': float(confidence_percent),
             'class_idx': int(class_idx),
-            'all_confidences': all_confidences,
             'image_path': f'uploads/{filename}'
         })
         
     except Exception as e:
         print(f"❌ Prediction error: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/predict-camera', methods=['POST'])
+@login_required
+def predict_camera():
+    """
+    Handle prediction request from camera (base64 image)
+    
+    Expected POST data:
+        - image: Base64 encoded image string
+    
+    Returns JSON:
+        {
+            'success': bool,
+            'prediction': str (class name only),
+            'confidence': float (0-1),
+            'confidence_percent': float (0-100),
+            'error': str (if failed)
+        }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'image' not in data:
+            return jsonify({'success': False, 'error': 'No image provided'}), 400
+        
+        base64_image = data['image']
+        
+        # Make prediction from base64
+        print("Making live camera prediction...")
+        class_name, confidence, class_idx, all_confidences = predict_image_from_base64(base64_image)
+        confidence_percent = confidence * 100
+        
+        # Save prediction to database (optional, for camera feed)
+        try:
+            # Generate a temporary file for camera capture
+            upload_folder = 'static/uploads'
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            # Decode and save the image
+            if ',' in base64_image:
+                img_data = base64.b64decode(base64_image.split(',')[1])
+            else:
+                img_data = base64.b64decode(base64_image)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_')
+            filename = f"{timestamp}camera_capture.jpg"
+            filepath = os.path.join(upload_folder, filename)
+            
+            with open(filepath, 'wb') as f:
+                f.write(img_data)
+            
+            # Save to database
+            pred_record = Prediction(
+                user_id=current_user.id,
+                image_path=f'uploads/{filename}',
+                prediction=class_name,
+                confidence=confidence,
+                class_idx=class_idx,
+                all_probabilities=str(all_confidences)
+            )
+            
+            db.session.add(pred_record)
+            db.session.commit()
+        except Exception as db_error:
+            print(f"Warning: Could not save camera prediction to DB: {db_error}")
+        
+        print(f"Prediction: {class_name} ({confidence_percent:.2f}%)")
+        
+        return jsonify({
+            'success': True,
+            'prediction': class_name,
+            'confidence': float(confidence),
+            'confidence_percent': float(confidence_percent),
+            'class_idx': int(class_idx)
+        })
+        
+    except Exception as e:
+        print(f"❌ Camera prediction error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @main_bp.route('/history')
